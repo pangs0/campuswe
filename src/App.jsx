@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import "./App.css";
+import { supabase } from "./supabase";
+import Auth from "./Auth";
 
 // ── DATA ──────────────────────────────────────────────────────────────────────
 const USERS = [
@@ -9,14 +11,6 @@ const USERS = [
   { n: "YUKI.AI", c: "#f0883e", city: "Tokyo 🇯🇵", karma: 3441, role: "AI Uzmanı" },
   { n: "AMARA.FIN", c: "#ff79c6", city: "Lagos 🇳🇬", karma: 678, role: "Fintech" },
   { n: "LARS.GRN", c: "#e3b341", city: "Oslo 🇳🇴", karma: 1560, role: "Greentech" },
-];
-
-const INIT_MSGS = [
-  { id: 1, u: "HAKAN.DEV", c: "#238636", city: "Istanbul 🇹🇷", t: "Selamlar! React Native bilen ortak arıyorum 🚀", time: "2d" },
-  { id: 2, u: "SOFIA.UX", c: "#1f6feb", city: "Madrid 🇪🇸", t: "Anyone for UX collab? Fintech projesi var.", time: "4d" },
-  { id: 3, u: "JAMES.BTC", c: "#a371f7", city: "New York 🇺🇸", t: "Blockchain dev — open to new projects", time: "7d" },
-  { id: 4, u: "YUKI.AI", c: "#f0883e", city: "Tokyo 🇯🇵", t: "Just pushed our AI demo to production! 🎉", time: "12d" },
-  { id: 5, u: "AMARA.FIN", c: "#ff79c6", city: "Lagos 🇳🇬", t: "Fintech için 2 kişilik ekip arıyorum 🙋", time: "15d" },
 ];
 
 const STARTUPS_DATA = [
@@ -108,19 +102,55 @@ const KarmaToast = ({ amount, onDone }) => {
 
 // ── PAGES ─────────────────────────────────────────────────────────────────────
 
-// GLOBAL PLAZA
-const GlobalPlaza = ({ onKarmaEarn }) => {
-  const [msgs, setMsgs] = useState(INIT_MSGS);
+// GLOBAL PLAZA — gerçek zamanlı mesajlar
+const GlobalPlaza = ({ onKarmaEarn, user }) => {
+  const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
   const [coffeeActive, setCoffeeActive] = useState(false);
   const [coffeeTimer, setCoffeeTimer] = useState(300);
   const [coffeeUser, setCoffeeUser] = useState(null);
 
-  const sendMsg = () => {
-    if (!input.trim()) return;
-    setMsgs(m => [...m, { id: Date.now(), u: "SEN", c: "#238636", city: "Kayseri 🇹🇷", t: input, time: "az önce" }]);
-    setInput("");
-  };
+  useEffect(() => {
+    // Mevcut mesajları yükle
+    const fetchMsgs = async () => {
+      const { data } = await supabase
+        .from("messages")
+        .select("*")
+        .order("created_at", { ascending: true })
+        .limit(50);
+      if (data) setMsgs(data);
+    };
+    fetchMsgs();
+
+    // Gerçek zamanlı dinle
+    const channel = supabase
+      .channel("messages")
+      .on("postgres_changes", {
+        event: "INSERT",
+        schema: "public",
+        table: "messages"
+      }, (payload) => {
+        setMsgs(m => [...m, payload.new]);
+      })
+      .subscribe();
+
+    return () => supabase.removeChannel(channel);
+  }, []);
+
+const sendMsg = async () => {
+  if (!input.trim()) return;
+  const username = user?.email?.split("@")[0]?.toUpperCase() || "KULLANICI";
+  console.log("Mesaj gönderiliyor:", { user_id: user.id, username, content: input });
+  const { data, error } = await supabase.from("messages").insert({
+    user_id: user.id,
+    username,
+    avatar_color: "#238636",
+    city: "Türkiye 🇹🇷",
+    content: input,
+  });
+  console.log("Sonuç:", data, "Hata:", error);
+  setInput("");
+};
 
   const startCoffee = () => {
     if (coffeeActive) return;
@@ -149,7 +179,6 @@ const GlobalPlaza = ({ onKarmaEarn }) => {
           <span style={{ fontFamily: "'Press Start 2P'", fontSize: 6, color: "#3fb950" }}>247 ONLINE</span>
         </div>
       </div>
-
       <div style={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: 12 }}>
         <div>
           <div style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 8, marginBottom: 10 }}>
@@ -158,16 +187,20 @@ const GlobalPlaza = ({ onKarmaEarn }) => {
               <span style={{ fontFamily: "'Press Start 2P'", fontSize: 6, color: "#7d8590" }}>CANLI MESAJLAR</span>
             </div>
             <div style={{ maxHeight: 260, overflowY: "auto", padding: 12 }}>
+              {msgs.length === 0 && (
+                <div style={{ textAlign: "center", color: "#484f58", fontFamily: "'Press Start 2P'", fontSize: 7, padding: 20 }}>
+                  İlk mesajı sen yaz! 👋
+                </div>
+              )}
               {msgs.map(m => (
                 <div key={m.id} style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-                  <Av initials={m.u.slice(0, 2)} color={m.c} size={34} />
+                  <Av initials={(m.username || "?").slice(0, 2)} color={m.avatar_color || "#238636"} size={34} />
                   <div style={{ flex: 1 }}>
                     <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 3 }}>
-                      <span style={{ fontFamily: "'Press Start 2P'", fontSize: 6, color: m.c }}>{m.u}</span>
+                      <span style={{ fontFamily: "'Press Start 2P'", fontSize: 6, color: m.avatar_color || "#238636" }}>{m.username}</span>
                       <span style={{ fontSize: 10, color: "#7d8590" }}>{m.city}</span>
-                      <span style={{ fontSize: 10, color: "#484f58", marginLeft: "auto" }}>{m.time}</span>
                     </div>
-                    <div style={{ background: "#21262d", borderRadius: 6, padding: "7px 10px", border: "1px solid #21262d", fontSize: 12 }}>{m.t}</div>
+                    <div style={{ background: "#21262d", borderRadius: 6, padding: "7px 10px", fontSize: 12 }}>{m.content}</div>
                   </div>
                 </div>
               ))}
@@ -180,11 +213,9 @@ const GlobalPlaza = ({ onKarmaEarn }) => {
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && sendMsg()}
               />
-              <button onClick={sendMsg} style={{ background: "#238636", border: "1px solid #238636", borderRadius: 6, padding: "6px 14px", color: "#fff", fontFamily: "'Press Start 2P'", fontSize: 6, cursor: "pointer" }}>GÖNDER</button>
+              <button onClick={() => { console.log("BUTON TIKLANDI"); sendMsg(); }} style={{ background: "#238636", border: "1px solid #238636", borderRadius: 6, padding: "6px 14px", color: "#fff", fontFamily: "'Press Start 2P'", fontSize: 6, cursor: "pointer" }}>GÖNDER</button>
             </div>
           </div>
-
-          {/* Coffee Break */}
           <div style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 8, padding: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <span style={{ fontSize: 20 }}>☕</span>
@@ -206,8 +237,6 @@ const GlobalPlaza = ({ onKarmaEarn }) => {
             )}
           </div>
         </div>
-
-        {/* Online users */}
         <div style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 8, overflow: "hidden" }}>
           <div style={{ padding: "8px 12px", borderBottom: "1px solid #30363d" }}>
             <span style={{ fontFamily: "'Press Start 2P'", fontSize: 6, color: "#7d8590" }}>ONLINE</span>
@@ -233,7 +262,6 @@ const GlobalPlaza = ({ onKarmaEarn }) => {
   );
 };
 
-// CHILL ZONE
 const ChillZone = ({ onKarmaEarn }) => {
   const lounge = [
     { n: "SOFIA.UX", c: "#1f6feb", status: "Müzik dinliyor 🎵", av: true },
@@ -246,7 +274,6 @@ const ChillZone = ({ onKarmaEarn }) => {
     { time: "18:00", title: "Pitch Feedback", host: "JAMES.BTC" },
     { time: "20:00", title: "Global Networking", host: "CAMPUSWE" },
   ];
-
   return (
     <div>
       <div style={{ marginBottom: 14 }}>
@@ -275,7 +302,6 @@ const ChillZone = ({ onKarmaEarn }) => {
             <button style={{ width: "100%", background: "#21262d", border: "1px solid #30363d", borderRadius: 6, padding: "7px", color: "#e6edf3", fontFamily: "'Press Start 2P'", fontSize: 6, cursor: "pointer" }}>+ MASAYA OTUR</button>
           </div>
         </div>
-
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 8, padding: 12 }}>
             <div style={{ fontFamily: "'Press Start 2P'", fontSize: 6, color: "#f0883e", marginBottom: 10 }}>🕹️ ARCADE</div>
@@ -307,7 +333,6 @@ const ChillZone = ({ onKarmaEarn }) => {
   );
 };
 
-// STARTUP GARAGE
 const StartupGarage = () => {
   const [startups, setStartups] = useState(STARTUPS_DATA);
   const [showModal, setShowModal] = useState(false);
@@ -337,7 +362,6 @@ const StartupGarage = () => {
         </div>
         <button onClick={() => setShowModal(true)} style={{ background: "#238636", border: "1px solid #238636", borderRadius: 6, padding: "6px 14px", color: "#fff", fontFamily: "'Press Start 2P'", fontSize: 6, cursor: "pointer" }}>+ YENİ STARTUP</button>
       </div>
-
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         {startups.map(s => (
           <div key={s.id} style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 8, padding: 14, transition: "border-color .15s", cursor: "pointer" }}
@@ -380,8 +404,6 @@ const StartupGarage = () => {
           </div>
         ))}
       </div>
-
-      {/* Investor floor */}
       <div style={{ marginTop: 12, background: "#161b22", border: "1px solid #f0883e", borderRadius: 8, padding: 14 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ fontSize: 22 }}>💼</span>
@@ -392,11 +414,9 @@ const StartupGarage = () => {
           <button style={{ background: "#21262d", border: "1px solid #f0883e", borderRadius: 6, padding: "5px 12px", color: "#f0883e", fontFamily: "'Press Start 2P'", fontSize: 6, cursor: "pointer" }}>🔒 UNLOCK</button>
         </div>
       </div>
-
-      {/* Modal */}
       {showModal && (
         <div onClick={() => setShowModal(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999 }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 8, padding: 20, width: 340, animation: "popIn .2s ease" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 8, padding: 20, width: 340 }}>
             <div style={{ fontFamily: "'Press Start 2P'", fontSize: 9, marginBottom: 14 }}>YENİ STARTUP KUR</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
               <input style={{ background: "#0d1117", border: "1px solid #30363d", borderRadius: 6, padding: "7px 10px", color: "#e6edf3", fontSize: 13, outline: "none" }} placeholder="Startup adı..." value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
@@ -417,7 +437,6 @@ const StartupGarage = () => {
   );
 };
 
-// CONTESTS
 const Contests = () => {
   const [activeTab, setActiveTab] = useState("aktif");
   const [joinModal, setJoinModal] = useState(null);
@@ -428,7 +447,6 @@ const Contests = () => {
         <div style={{ fontFamily: "'Press Start 2P'", fontSize: 10, marginBottom: 3 }}>🏆 YARIŞMALAR</div>
         <div style={{ fontSize: 11, color: "#7d8590" }}>AI destekli yarışmalara katıl, karma kazan, yatırım al</div>
       </div>
-
       <div style={{ display: "flex", borderBottom: "1px solid #30363d", marginBottom: 14 }}>
         {[["aktif", "Aktif"], ["gecmis", "Geçmiş"]].map(([k, v]) => (
           <div key={k} onClick={() => setActiveTab(k)} style={{ padding: "7px 14px", fontFamily: "'Press Start 2P'", fontSize: 6, color: activeTab === k ? "#e6edf3" : "#7d8590", borderBottom: activeTab === k ? "2px solid #f0883e" : "2px solid transparent", cursor: "pointer" }}>{v}</div>
@@ -437,7 +455,6 @@ const Contests = () => {
           <span style={{ fontFamily: "'Press Start 2P'", fontSize: 6, color: "#a371f7" }}>🤖 AI MOTOR AKTİF</span>
         </div>
       </div>
-
       {activeTab === "aktif" && CONTESTS_DATA.map(c => (
         <div key={c.id} style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 8, padding: 14, marginBottom: 10 }}>
           <div style={{ display: "flex", alignItems: "start", justifyContent: "space-between", gap: 10 }}>
@@ -466,7 +483,6 @@ const Contests = () => {
           </div>
         </div>
       ))}
-
       {activeTab === "gecmis" && (
         <div style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 8 }}>
           {[{ title: "MedTech Hackathon", winner: "HAKAN.DEV & Team", karma: 5000, date: "2 hafta önce" },
@@ -485,10 +501,9 @@ const Contests = () => {
             ))}
         </div>
       )}
-
       {joinModal && (
         <div onClick={() => setJoinModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999 }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 8, padding: 20, width: 340, animation: "popIn .2s ease" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 8, padding: 20, width: 340 }}>
             <div style={{ fontFamily: "'Press Start 2P'", fontSize: 9, marginBottom: 8 }}>YARIŞMAYA KATIL</div>
             <div style={{ fontSize: 12, color: "#7d8590", marginBottom: 14 }}>{joinModal.title}</div>
             <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
@@ -503,42 +518,37 @@ const Contests = () => {
   );
 };
 
-// PROFILE
-const Profile = ({ karma, xp, onKarmaEarn }) => {
+const Profile = ({ karma, xp, onKarmaEarn, user, onLogout }) => {
+  const username = user?.email?.split("@")[0]?.toUpperCase() || "KULLANICI";
   return (
     <div>
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontFamily: "'Press Start 2P'", fontSize: 10, marginBottom: 3 }}>👤 PROFİLİM</div>
         <div style={{ fontSize: 11, color: "#7d8590" }}>Yeteneklerini takas et, karma biriktir</div>
       </div>
-
       <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: 12 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 8, padding: 16, textAlign: "center" }}>
-            <Av initials="HA" color="#238636" size={64} />
-            <div style={{ fontFamily: "'Press Start 2P'", fontSize: 9, margin: "10px 0 3px" }}>HAKAN.DEV</div>
-            <div style={{ fontSize: 11, color: "#7d8590", marginBottom: 6 }}>Kayseri, Türkiye 🇹🇷</div>
+            <Av initials={username.slice(0, 2)} color="#238636" size={64} />
+            <div style={{ fontFamily: "'Press Start 2P'", fontSize: 9, margin: "10px 0 3px" }}>{username}</div>
+            <div style={{ fontSize: 11, color: "#7d8590", marginBottom: 6 }}>{user?.email}</div>
             <Badge type="bo">⚔️ VİZYONER</Badge>
             <div style={{ margin: "10px 0 4px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                <span style={{ fontFamily: "'Press Start 2P'", fontSize: 6, color: "#7d8590" }}>LV 12</span>
+                <span style={{ fontFamily: "'Press Start 2P'", fontSize: 6, color: "#7d8590" }}>LV 1</span>
                 <span style={{ fontFamily: "'Press Start 2P'", fontSize: 6, color: "#7d8590" }}>{xp}/100 XP</span>
               </div>
               <XPBar value={xp} />
             </div>
             <div style={{ fontFamily: "'Press Start 2P'", fontSize: 12, color: "#e3b341", marginTop: 8 }}>✨ {karma.toLocaleString()}</div>
             <div style={{ fontFamily: "'Press Start 2P'", fontSize: 6, color: "#7d8590", marginTop: 2 }}>KARMA PUANI</div>
-            <div style={{ borderTop: "1px solid #30363d", margin: "10px 0", paddingTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, textAlign: "center" }}>
-              {[["12", "YARIŞ"], ["3", "START"], ["247", "K/GÜN"]].map(([n, l]) => (
-                <div key={l}>
-                  <div style={{ fontFamily: "'Press Start 2P'", fontSize: 8, color: "#e6edf3" }}>{n}</div>
-                  <div style={{ fontFamily: "'Press Start 2P'", fontSize: 5, color: "#7d8590", marginTop: 2 }}>{l}</div>
-                </div>
-              ))}
+            <div style={{ borderTop: "1px solid #30363d", marginTop: 10, paddingTop: 10 }}>
+              <button onClick={onLogout} style={{ width: "100%", background: "transparent", border: "1px solid #f85149", borderRadius: 6, padding: "6px", color: "#f85149", fontFamily: "'Press Start 2P'", fontSize: 6, cursor: "pointer" }}>
+                ÇIKIŞ YAP
+              </button>
             </div>
           </div>
         </div>
-
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 8, padding: 14 }}>
             <div style={{ fontFamily: "'Press Start 2P'", fontSize: 6, color: "#7d8590", marginBottom: 12 }}>BECERİLER</div>
@@ -552,12 +562,11 @@ const Profile = ({ karma, xp, onKarmaEarn }) => {
               </div>
             ))}
           </div>
-
           <div style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 8, padding: 14 }}>
             <div style={{ fontFamily: "'Press Start 2P'", fontSize: 6, color: "#7d8590", marginBottom: 12 }}>⚡ YETENEK TAKAS ET → KARMA KAZAN</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               {ABILITIES.map(a => (
-                <button key={a.n} onClick={() => onKarmaEarn(a.k)} style={{ background: "#21262d", border: "1px solid #30363d", borderRadius: 6, padding: "10px", color: "#e6edf3", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, textAlign: "left", transition: "border-color .15s" }}
+                <button key={a.n} onClick={() => onKarmaEarn(a.k)} style={{ background: "#21262d", border: "1px solid #30363d", borderRadius: 6, padding: "10px", color: "#e6edf3", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, textAlign: "left" }}
                   onMouseEnter={e => e.currentTarget.style.borderColor = a.c}
                   onMouseLeave={e => e.currentTarget.style.borderColor = "#30363d"}>
                   <span style={{ fontSize: 16 }}>{a.icon}</span>
@@ -569,7 +578,6 @@ const Profile = ({ karma, xp, onKarmaEarn }) => {
               ))}
             </div>
           </div>
-
           <div style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 8, padding: 14 }}>
             <div style={{ fontFamily: "'Press Start 2P'", fontSize: 6, color: "#7d8590", marginBottom: 12 }}>🏆 BAŞARIMLAR</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -589,10 +597,30 @@ const Profile = ({ karma, xp, onKarmaEarn }) => {
 
 // ── MAIN APP ──────────────────────────────────────────────────────────────────
 export default function App() {
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [page, setPage] = useState("plaza");
-  const [karma, setKarma] = useState(1247);
-  const [xp, setXp] = useState(68);
+  const [karma, setKarma] = useState(0);
+  const [xp, setXp] = useState(0);
   const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setUser(data.session?.user ?? null);
+      setAuthLoading(false);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  const logout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setKarma(0);
+    setXp(0);
+  };
 
   const earnKarma = (amount) => {
     setKarma(k => k + amount);
@@ -600,6 +628,16 @@ export default function App() {
     setToast(amount);
     setTimeout(() => setToast(null), 1400);
   };
+
+  if (authLoading) return (
+    <div style={{ minHeight: "100vh", background: "#0d1117", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Press Start 2P'", color: "#7d8590", fontSize: 8 }}>
+      YÜKLENİYOR...
+    </div>
+  );
+
+  if (!user) return <Auth onLogin={setUser} />;
+
+  const username = user?.email?.split("@")[0]?.toUpperCase() || "?";
 
   const navItems = [
     { id: "plaza", label: "GLOBAL PLAZA", count: "247" },
@@ -613,7 +651,6 @@ export default function App() {
     <div style={{ minHeight: "100vh", background: "#0d1117", color: "#e6edf3", fontFamily: "'Inter', sans-serif" }}>
       {toast && <KarmaToast amount={toast} onDone={() => setToast(null)} />}
 
-      {/* HEADER */}
       <header style={{ height: 52, background: "#161b22", borderBottom: "1px solid #30363d", display: "flex", alignItems: "center", padding: "0 20px", gap: 16, position: "sticky", top: 0, zIndex: 100 }}>
         <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
           {"CAMPUSWE".split("").map((c, i) => (
@@ -627,11 +664,10 @@ export default function App() {
             <span>✨</span>
             <span style={{ fontFamily: "'Press Start 2P'", fontSize: 7, color: "#e3b341" }}>{karma.toLocaleString()}</span>
           </div>
-          <Av initials="HA" color="#238636" size={28} />
+          <Av initials={username.slice(0, 2)} color="#238636" size={28} />
         </div>
       </header>
 
-      {/* TICKER */}
       <div style={{ background: "#161b22", borderBottom: "1px solid #30363d", height: 28, overflow: "hidden", display: "flex", alignItems: "center" }}>
         <div style={{ padding: "0 12px", borderRight: "1px solid #30363d", flexShrink: 0 }}>
           <span style={{ fontFamily: "'Press Start 2P'", fontSize: 6, color: "#f0883e" }}>LIVE</span>
@@ -645,9 +681,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* LAYOUT */}
       <div style={{ display: "flex", height: "calc(100vh - 80px)" }}>
-        {/* SIDEBAR */}
         <aside style={{ width: 200, background: "#161b22", borderRight: "1px solid #30363d", padding: "12px 8px", display: "flex", flexDirection: "column", gap: 3, overflowY: "auto", flexShrink: 0 }}>
           {navItems.map(n => (
             <div key={n.id} onClick={() => setPage(n.id)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 6, color: page === n.id ? "#e6edf3" : "#7d8590", background: page === n.id ? "#21262d" : "transparent", border: `1px solid ${page === n.id ? "#30363d" : "transparent"}`, cursor: "pointer", fontFamily: "'Press Start 2P'", fontSize: 6, transition: "all .12s" }}
@@ -665,13 +699,12 @@ export default function App() {
           </div>
         </aside>
 
-        {/* MAIN */}
         <main style={{ flex: 1, overflowY: "auto", padding: 20 }}>
-          {page === "plaza" && <GlobalPlaza onKarmaEarn={earnKarma} />}
+          {page === "plaza" && <GlobalPlaza onKarmaEarn={earnKarma} user={user} />}
           {page === "chill" && <ChillZone onKarmaEarn={earnKarma} />}
           {page === "garage" && <StartupGarage />}
           {page === "contests" && <Contests />}
-          {page === "profile" && <Profile karma={karma} xp={xp} onKarmaEarn={earnKarma} />}
+          {page === "profile" && <Profile karma={karma} xp={xp} onKarmaEarn={earnKarma} user={user} onLogout={logout} />}
         </main>
       </div>
     </div>
