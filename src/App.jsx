@@ -604,11 +604,23 @@ export default function App() {
   const [xp, setXp] = useState(0);
   const [toast, setToast] = useState(null);
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setUser(data.session?.user ?? null);
-      setAuthLoading(false);
-    });
+useEffect(() => {
+  supabase.auth.getSession().then(async ({ data }) => {
+    const u = data.session?.user ?? null;
+    setUser(u);
+    if (u) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("karma, xp")
+        .eq("id", u.id)
+        .single();
+      if (profile) {
+        setKarma(profile.karma || 0);
+        setXp(profile.xp || 0);
+      }
+    }
+    setAuthLoading(false);
+  });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
     });
@@ -622,12 +634,22 @@ export default function App() {
     setXp(0);
   };
 
-  const earnKarma = (amount) => {
-    setKarma(k => k + amount);
-    setXp(x => Math.min(100, x + 5));
-    setToast(amount);
-    setTimeout(() => setToast(null), 1400);
-  };
+const earnKarma = async (amount) => {
+  console.log("USER:", user, "USER ID:", user?.id);
+  const newKarma = karma + amount;
+  const newXp = Math.min(100, xp + 5);
+  setKarma(newKarma);
+  setXp(newXp);
+  setToast(amount);
+  setTimeout(() => setToast(null), 1400);
+  if (user?.id) {
+    const result = await supabase
+      .from("profiles")
+      .update({ karma: newKarma, xp: newXp })
+      .eq("id", user.id);
+    console.log("Supabase update sonucu:", result);
+  }
+};
 
   if (authLoading) return (
     <div style={{ minHeight: "100vh", background: "#0d1117", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Press Start 2P'", color: "#7d8590", fontSize: 8 }}>
